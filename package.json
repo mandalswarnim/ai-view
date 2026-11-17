@@ -1,0 +1,17 @@
+{
+  "name": "ai-view",
+  "private": true,
+  "packageManager": "pnpm@10.34.9",
+  "engines": {
+    "node": ">=20.12"
+  },
+  "scripts": {
+    "dev:web": "pnpm --filter @aiview/web dev",
+    "dev:extension": "pnpm --filter @aiview/extension dev",
+    "build:web": "pnpm --filter @aiview/web build",
+    "build:extension": "pnpm --filter @aiview/extension build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "accuracy": "pnpm --filter @aiview/web accuracy"
+  }
+}

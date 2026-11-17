@@ -1,0 +1,23 @@
+node_modules/
+.next/
+.output/
+.wxt/
+dist/
+.data/
+*.tsbuildinfo
+next-env.d.ts
+.DS_Store
+
+# Secrets live in .env.local only
+.env
+.env.local
+.env.*.local
+
+# Accuracy script output
+accuracy-results*.json
+
+# Real saved portal pages are third-party content: keep them local.
+# Hand-written synthetic fixtures are committed.
+fixtures/**/*_files/
+fixtures/*/*.html
+!fixtures/*/synthetic-*.html
