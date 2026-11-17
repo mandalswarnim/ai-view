@@ -1,7 +1,13 @@
 import { CACHE_ONLY_PARAM, INSTALL_ID_HEADER, type AnalyseResponse } from "@aiview/shared";
 import { handleAnalyse } from "@/lib/analyseService";
 import { analyseListing } from "@/lib/analysis/pipeline";
-import { analysisDeps, dailyLimit, reportStore } from "@/lib/config";
+import {
+  analysisDeps,
+  analysisUnavailable,
+  dailyLimit,
+  globalDailyLimit,
+  reportStore,
+} from "@/lib/config";
 import { heartbeatJson } from "@/lib/heartbeat";
 
 export const runtime = "nodejs";
@@ -41,6 +47,8 @@ export async function POST(request: Request): Promise<Response> {
         store: reportStore(),
         analyse: (listing) => analyseListing(listing, analysisDeps()),
         dailyLimit: dailyLimit(),
+        globalDailyLimit: globalDailyLimit(),
+        unavailable: analysisUnavailable,
       },
     );
   } catch (error) {

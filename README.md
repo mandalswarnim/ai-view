@@ -3,29 +3,61 @@
 Tells UK home buyers and renters when the photos on a property listing show
 signs of AI editing, and whether the listing says so.
 
-**Status: side project, paused after phase 1 of 5.** It is not launched and
-has never been run against a real model.
+**Status: a side project, paused after phase 1 of 5.** It runs on your own
+machine with your own Anthropic API key. There is no hosted service.
 
 What works:
 
-- Shared schemas, and `POST /api/analyse` with caching, a disclosure check
-  and per-install rate limiting.
+- `POST /api/analyse` with caching, a disclosure check and rate limiting.
 - A Rightmove adapter, tested against a real saved listing page.
 - A Chrome extension panel that shows the report on a listing page.
 - A script for measuring accuracy over a folder of test listings.
 
 Not built: Zoopla and OnTheMarket adapters, the mobile PWA, viewer photo
-uploads, payments, landing page and privacy policy.
+uploads, landing page and privacy policy.
 
-Open questions, in the order they matter:
+## Read this before trusting a report
 
-1. **Accuracy is unmeasured.** Spotting AI edits in a photo with no "before"
-   image is unreliable for any model. Nobody should rely on a report until
-   the accuracy script has been run on listings where the truth is known.
-2. The extension panel has not been loaded on a live listing page, and the
-   Supabase store has not been run against a real project.
-3. The server downloads listing photos from the portal's image CDN to
-   downscale them. A portal could block that or object to it.
+- **Accuracy is unmeasured.** Spotting AI edits in a photo with no "before"
+  image is unreliable for any model. Treat a report as a list of things to
+  look at in person, and run the accuracy script on listings where you know
+  the truth before relying on it.
+- **Verified so far:** the test suite, and a full run in mock mode (no model)
+  against a real Rightmove listing: page read, photos downloaded and
+  downscaled, report cached and served. **Not verified:** a run against a
+  real vision model, and the panel inside Chrome on a live page.
+
+## Quick start with your own API key
+
+Needs Node 20.12 or newer, Chrome, and an Anthropic API key from
+https://console.anthropic.com (this is separate from a Claude subscription,
+and each listing check is billed to it).
+
+```bash
+git clone https://github.com/mandalswarnim/ai-view.git
+cd ai-view
+corepack enable                       # once, makes the pinned pnpm available
+pnpm install
+cp .env.example apps/web/.env.local   # then put your key in ANTHROPIC_API_KEY
+pnpm dev:web                          # leave running: http://localhost:3000
+```
+
+In a second terminal:
+
+```bash
+pnpm build:extension
+```
+
+Then in Chrome open `chrome://extensions`, turn on **Developer mode**, click
+**Load unpacked** and choose `apps/extension/.output/chrome-mv3`. Open any
+`https://www.rightmove.co.uk/properties/...` page and click **Check this
+listing** in the panel at the bottom right.
+
+No key yet? Set `AIVIEW_MOCK_VISION=1` in `apps/web/.env.local` instead. No
+model is called and reports contain one clearly labelled placeholder finding.
+
+Your key stays in `apps/web/.env.local`, which git ignores. It is read only
+by the local server and is never sent to the extension or the browser.
 
 ## Layout
 
@@ -38,30 +70,22 @@ fixtures/            saved listing pages for adapter tests; test listings for ac
 supabase/migrations  SQL for the report cache and rate-limit tables
 ```
 
-## Setup
+## Settings
 
-Needs Node 20.12 or newer.
+All in `apps/web/.env.local`; `.env.example` documents each one.
 
-```bash
-corepack enable            # once, makes the pinned pnpm available
-pnpm install
-cp .env.example apps/web/.env.local
-```
-
-Then edit `apps/web/.env.local`:
-
-- `ANTHROPIC_API_KEY` is required for real analyses.
-- `ANTHROPIC_MODEL` picks the vision model (default `claude-opus-5-5`).
-- Leave the Supabase values empty for local development. Reports and
-  rate-limit counters are then kept in `apps/web/.data/store.json`.
-- To try everything without an API key or any model cost, add
-  `AIVIEW_MOCK_VISION=1`. Reports then contain one placeholder finding and
-  are labelled with the model name `mock`.
+- `ANTHROPIC_MODEL` picks the vision model (default `claude-opus-5-5`;
+  `claude-sonnet-5-5` and `claude-haiku-5-5` cost less per check).
+- `ANALYSES_PER_DAY` (default 10) limits new checks per browser install.
+- `MAX_ANALYSES_PER_DAY_TOTAL` (default 200) limits new checks per day
+  across everyone. It is the ceiling on what your key can spend in a day.
+- Leave the Supabase values empty for local use. Reports and counters are
+  then kept in `apps/web/.data/store.json`.
 
 If `corepack enable` is not allowed on your machine, prefix commands with
 `corepack` instead (`corepack pnpm install`).
 
-### Supabase (needed before deploying)
+### Supabase (only if you deploy it)
 
 Create a project, run `supabase/migrations/0001_core.sql` in its SQL editor,
 and put the project URL and service-role key in `apps/web/.env.local`.
@@ -164,14 +188,15 @@ Tests that need a specific real page skip themselves when it is absent.
 
 ## How a report is produced
 
-1. **Cache.** The key is `portal:listingId:hash(sorted photo URLs)`. A
-   listing is analysed once; changing its photos gives a new key.
+1. **Cache.** The key is `portal:listingId:hash(sorted photo and floor plan
+   URLs)`. A listing is analysed once; changing its images gives a new key.
 2. **Disclosure check** (no AI). The description, key features and photo
    captions are searched for wording such as "virtually staged", "CGI",
    "digitally enhanced", "AI" and "for illustrative purposes".
 3. **Vision analysis.** Up to 20 photos (1024px longest edge) and up to 2
    floor plans are sent to the model in one call, using structured outputs.
-   Each finding has a category, one sentence of evidence and a confidence.
+   Only images are sent: no description, captions or agent name. Each
+   finding has a category, one sentence of evidence and a confidence.
 4. **Status, derived in code** (`apps/web/src/lib/analysis/status.ts`).
    Only findings of medium or high confidence count:
    - a structural or concealment finding, or a mismatch between photos or
@@ -185,6 +210,35 @@ Tests that need a specific real page skip themselves when it is absent.
 5. **Wording check.** Evidence that uses accusatory words or names the
    agent is replaced with a neutral sentence before it is stored.
 
+## Security
+
+What the code does to stay safe, mainly for anyone who puts the server on
+the public internet:
+
+- **Your API key is server-side only.** Keep it in `.env.local` or your
+  host's secret settings. Never commit it.
+- **Spend is capped.** New checks are limited per install and per day
+  overall (see Settings). Install IDs are anonymous and easy to reset, so
+  the overall daily cap is the one that protects your bill.
+- **The server only downloads images from the portal's own image hosts**,
+  over https, without following redirects. It cannot be pointed at other
+  addresses.
+- **The cache cannot be poisoned through listing text.** Cached results hold
+  only what the model saw in the images. The disclosure check, the status,
+  captions and photo numbering are worked out again for every request from
+  that visitor's own copy of the page, and no listing text reaches the model.
+- **Model wording is filtered.** Evidence that uses accusatory words or
+  names the agent is replaced before it is stored or shown.
+- **The extension has minimal permissions:** `storage`, the listing
+  page pattern it runs on, and the one API origin it is built for. It
+  loads no remote code, and only renders images from the portal's hosts.
+
+Limits you should know about: there is no login, so anyone who can reach a
+public deployment can use it up to the caps. For personal use, keep it on
+`localhost`.
+
+Found a problem? Open an issue on GitHub.
+
 ## Data
 
 Stored: listing metadata, photo URLs, reports, and per-install daily
@@ -192,3 +246,7 @@ counters. Portal images are downloaded into memory to be downscaled and sent
 to the model, and are never saved. The extension reads only the listing page
 that is open, and stores an anonymous install ID and whether the panel is
 minimised.
+
+## Licence
+
+MIT. See `LICENSE`.

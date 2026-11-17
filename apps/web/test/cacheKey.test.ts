@@ -21,9 +21,29 @@ describe("cacheKeyFor", () => {
     expect(cacheKeyFor(noisy)).toBe(cacheKeyFor(listing));
   });
 
-  it("ignores text that is not part of the key", () => {
-    const edited = makeListing({ description: "Price reduced!", floorPlans: [] });
+  it("ignores listing text", () => {
+    const edited = makeListing({
+      description: "Price reduced!",
+      keyFeatures: [],
+      address: "Elsewhere",
+      agentName: null,
+    });
     expect(cacheKeyFor(edited)).toBe(cacheKeyFor(listing));
+  });
+
+  it("changes when the floor plan changes, since the model is shown it", () => {
+    const none = makeListing({ floorPlans: [] });
+    const other = makeListing({
+      floorPlans: [{ url: "https://media.rightmove.co.uk/b/OTHER_FLP.jpeg", caption: null }],
+    });
+    expect(new Set([cacheKeyFor(listing), cacheKeyFor(none), cacheKeyFor(other)]).size).toBe(3);
+  });
+
+  it("does not confuse a photo with a floor plan", () => {
+    const image = { url: "https://media.rightmove.co.uk/a/X.jpeg", caption: null };
+    const asPhoto = makeListing({ photos: [image], floorPlans: [] });
+    const asPlan = makeListing({ photos: [], floorPlans: [image] });
+    expect(cacheKeyFor(asPhoto)).not.toBe(cacheKeyFor(asPlan));
   });
 
   it("changes when a photo is added, removed or replaced", () => {

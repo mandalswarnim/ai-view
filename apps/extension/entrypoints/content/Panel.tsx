@@ -8,6 +8,7 @@ import {
   PORTALS,
   STATUS_LABELS,
   STATUS_SUMMARIES,
+  isPortalImageUrl,
   type Listing,
   type PhotoReport,
   type Report,
@@ -18,6 +19,23 @@ import { API_BASE_URL, type AnalyseMessage, type AnalyseReply, type PingMessage 
 
 const COLLAPSED_KEY = "panelCollapsed";
 const PING_MS = 20_000;
+
+/**
+ * Links are built here from the report's reference rather than taken from
+ * the server's reply, and images are only shown from the portal's own hosts,
+ * so a compromised or impostor server cannot put its own URLs on the page.
+ */
+function siteLink(path: string, cacheKey: string): string {
+  return `${API_BASE_URL}${path}?ref=${encodeURIComponent(cacheKey)}`;
+}
+
+function isHttps(url: string): boolean {
+  try {
+    return new URL(url).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 
 type View =
   | { state: "unreadable" }
@@ -78,7 +96,7 @@ export function Panel({ adapter }: { adapter: SiteAdapter }) {
       setView({
         state: "error",
         message: reply.error.message,
-        canRetry: reply.error.code === "analysis_failed" || reply.error.code === "network",
+        canRetry: ["analysis_failed", "network", "not_configured"].includes(reply.error.code),
       });
     }
   }, []);
@@ -180,7 +198,7 @@ export function Panel({ adapter }: { adapter: SiteAdapter }) {
       <footer className="panel-footer">
         <p>{DISCLAIMER}</p>
         {view.state === "report" && (
-          <a href={view.report.reportErrorUrl} target="_blank" rel="noreferrer">
+          <a href={siteLink("/report-error", view.report.cacheKey)} target="_blank" rel="noreferrer">
             Report an error
           </a>
         )}
@@ -214,7 +232,11 @@ function ReportView({ report }: { report: Report }) {
       {withFindings.length === 0 && <p>No signs of editing were noted in the photos checked.</p>}
       <ul className="photos">
         {withFindings.map((photo) => (
-          <PhotoFindings key={photo.index} photo={photo} />
+          <PhotoFindings
+            key={photo.index}
+            photo={photo}
+            showImage={isPortalImageUrl(report.portal, photo.url)}
+          />
         ))}
       </ul>
       {withFindings.length > 0 && clearCount > 0 && (
@@ -256,7 +278,7 @@ function ReportView({ report }: { report: Report }) {
         <p className="note">No viewer photos yet.</p>
       ) : (
         <ul className="viewer-photos">
-          {report.viewerPhotos.map((photo) => (
+          {report.viewerPhotos.filter((photo) => isHttps(photo.url)).map((photo) => (
             <li key={photo.id}>
               <img src={photo.url} alt="Photo taken at a viewing" loading="lazy" />
             </li>
@@ -265,7 +287,7 @@ function ReportView({ report }: { report: Report }) {
       )}
       <a
         className="secondary"
-        href={`${API_BASE_URL}/viewed?ref=${encodeURIComponent(report.cacheKey)}`}
+        href={siteLink("/viewed", report.cacheKey)}
         target="_blank"
         rel="noreferrer"
       >
@@ -275,13 +297,17 @@ function ReportView({ report }: { report: Report }) {
   );
 }
 
-function PhotoFindings({ photo }: { photo: PhotoReport }) {
+function PhotoFindings({ photo, showImage }: { photo: PhotoReport; showImage: boolean }) {
   const title = `Photo ${photo.index + 1}${photo.caption ? ` · ${photo.caption}` : ""}`;
   return (
     <li className="photo">
-      <a href={photo.url} target="_blank" rel="noreferrer" className="thumb">
-        <img src={photo.url} alt={title} loading="lazy" />
-      </a>
+      {showImage ? (
+        <a href={photo.url} target="_blank" rel="noreferrer" className="thumb">
+          <img src={photo.url} alt={title} loading="lazy" />
+        </a>
+      ) : (
+        <span className="thumb" />
+      )}
       <div>
         <p className="photo-title">{title}</p>
         {photo.findings.map((finding, i) => (

@@ -26,9 +26,24 @@ export function dailyLimit(): number {
   return positiveInt(process.env.ANALYSES_PER_DAY, 10);
 }
 
+/** Ceiling on new analyses per day across all installs, to cap model spend. */
+export function globalDailyLimit(): number {
+  return positiveInt(process.env.MAX_ANALYSES_PER_DAY_TOTAL, 200);
+}
+
+export function mockMode(): boolean {
+  return process.env.AIVIEW_MOCK_VISION === "1";
+}
+
+/** Explains what is missing when the server cannot run analyses, else null. */
+export function analysisUnavailable(): string | null {
+  if (mockMode() || process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN) return null;
+  return "This server has no Anthropic API key. Add ANTHROPIC_API_KEY to apps/web/.env.local and restart, or set AIVIEW_MOCK_VISION=1 to try it without one.";
+}
+
 /** Model and limits for the analysis, read from the environment. */
 export function analysisDeps(options: { mock?: boolean } = {}): AnalysisDeps {
-  const mock = options.mock ?? process.env.AIVIEW_MOCK_VISION === "1";
+  const mock = options.mock ?? mockMode();
   const model = process.env.ANTHROPIC_MODEL || DEFAULT_MODEL;
   return {
     vision: mock ? mockVision : createAnthropicVision(model),

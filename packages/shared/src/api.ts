@@ -13,6 +13,8 @@ export const ApiErrorCodeSchema = z.enum([
   "not_analysed",
   "rate_limited",
   "no_photos",
+  /** The server has no model credentials. */
+  "not_configured",
   "analysis_failed",
 ]);
 export type ApiErrorCode = z.infer<typeof ApiErrorCodeSchema>;

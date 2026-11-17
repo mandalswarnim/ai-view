@@ -48,8 +48,8 @@ export default async function ReportErrorPage({
 
       <h2>What happens next</h2>
       <p>
-        We look at the report and the listing photos. If the report is wrong we correct or remove
-        it. We aim to reply within five working days.
+        A person looks at the report and the listing photos. If the report is wrong we correct or
+        remove it.
       </p>
       <p>
         If you are the agent or owner for this listing, see{" "}

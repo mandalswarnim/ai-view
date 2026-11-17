@@ -9,15 +9,23 @@ import {
   type Report,
 } from "@aiview/shared";
 import { cacheKeyFor } from "./analysis/cacheKey";
-import { NoPhotosError } from "./analysis/pipeline";
+import { NoPhotosError, refreshReport } from "./analysis/pipeline";
 import type { ReportStore } from "./store/types";
 
 export interface ServiceDeps {
   store: ReportStore;
   /** Runs the full analysis for a listing that is not in the cache. */
   analyse: (listing: Listing) => Promise<Report>;
+  /** New analyses allowed per install per day. */
   dailyLimit: number;
+  /** New analyses allowed per day across everyone: a ceiling on model spend. */
+  globalDailyLimit: number;
+  /** Why analyses cannot run right now (e.g. no API key), or null when they can. */
+  unavailable?: () => string | null;
 }
+
+/** Counter key for the all-installs ceiling. Cannot collide with an install ID. */
+const GLOBAL_QUOTA_KEY = "__all_installs__";
 
 export interface AnalyseRequest {
   body: unknown;
@@ -65,6 +73,7 @@ async function runAnalysis(
   } catch (error) {
     // A failed analysis should not cost the user one of their daily checks.
     await deps.store.refundQuota(installId).catch(() => undefined);
+    await deps.store.refundQuota(GLOBAL_QUOTA_KEY).catch(() => undefined);
     if (error instanceof NoPhotosError) {
       return {
         ok: false,
@@ -99,7 +108,11 @@ export async function handleAnalyse(
   const cacheKey = cacheKeyFor(listing);
   const cached = await deps.store.getReport(cacheKey);
   if (cached !== null) {
-    return { kind: "ready", status: 200, body: { ok: true, report: cached, cached: true } };
+    return {
+      kind: "ready",
+      status: 200,
+      body: { ok: true, report: refreshReport(cached, listing), cached: true },
+    };
   }
 
   if (request.cacheOnly) {
@@ -112,11 +125,22 @@ export async function handleAnalyse(
     return failure(400, "invalid_request", "A valid install ID header is required.");
   }
 
+  const unavailable = deps.unavailable?.() ?? null;
+  if (unavailable !== null) return failure(503, "not_configured", unavailable);
+
   // Join an analysis of this listing that is already starting or running. If
   // that request turned out to be refused (its own rate limit), try under ours.
   for (let running = inFlight.get(cacheKey); running; running = inFlight.get(cacheKey)) {
     const outcome = await running;
-    if (outcome.kind === "pending") return outcome;
+    if (outcome.kind === "pending") {
+      // Same images, but this caller's own copy of the listing text.
+      return {
+        kind: "pending",
+        result: outcome.result.then((reply) =>
+          reply.ok ? { ...reply, report: refreshReport(reply.report, listing) } : reply,
+        ),
+      };
+    }
   }
 
   const started = start(listing, cacheKey, request.installId, deps);
@@ -130,20 +154,22 @@ async function start(
   installId: string,
   deps: ServiceDeps,
 ): Promise<AnalyseOutcome> {
-  let allowed: boolean;
+  let refusal: string | null = null;
   try {
-    allowed = await deps.store.consumeQuota(installId, deps.dailyLimit);
+    if (!(await deps.store.consumeQuota(installId, deps.dailyLimit))) {
+      refusal = `You have used today's ${deps.dailyLimit} new checks. Listings that were already checked are still available.`;
+    } else if (!(await deps.store.consumeQuota(GLOBAL_QUOTA_KEY, deps.globalDailyLimit))) {
+      await deps.store.refundQuota(installId);
+      refusal =
+        "This service has reached its limit for new checks today. Listings that were already checked are still available.";
+    }
   } catch (error) {
     inFlight.delete(cacheKey);
     throw error;
   }
-  if (!allowed) {
+  if (refusal !== null) {
     inFlight.delete(cacheKey);
-    return failure(
-      429,
-      "rate_limited",
-      `You have used today's ${deps.dailyLimit} new checks. Listings that were already checked are still available.`,
-    );
+    return failure(429, "rate_limited", refusal);
   }
 
   const result = runAnalysis(listing, installId, deps).finally(() => {

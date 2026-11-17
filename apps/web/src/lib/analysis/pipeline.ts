@@ -122,3 +122,57 @@ export async function analyseListing(listing: Listing, deps: AnalysisDeps): Prom
     analysedAt: (deps.now?.() ?? new Date()).toISOString(),
   };
 }
+
+/**
+ * Adapts a cached report to the listing in the current request.
+ *
+ * The cache holds what the model saw in the images. Everything that depends
+ * on listing text is worked out again from the caller's own copy of the
+ * page: the disclosure check, the status, captions and photo numbering. So
+ * one caller cannot change what another sees by submitting altered text.
+ */
+export function refreshReport(report: Report, listing: Listing): Report {
+  const positions = new Map(listing.photos.map((photo, index) => [photo.url, index] as const));
+  const renumbered = new Map<number, number>();
+
+  const photos: PhotoReport[] = [];
+  for (const photo of report.photos) {
+    const index = positions.get(photo.url);
+    if (index === undefined) continue;
+    renumbered.set(photo.index, index);
+    photos.push({
+      index,
+      url: photo.url,
+      caption: listing.photos[index]!.caption,
+      findings: photo.findings.map((finding) => ({
+        ...finding,
+        evidence: safeFindingEvidence(finding.evidence, finding.category, listing.agentName),
+      })),
+    });
+  }
+  photos.sort((a, b) => a.index - b.index);
+
+  const crossChecks = report.crossChecks.map((check) => ({
+    ...check,
+    evidence: safeCrossCheckEvidence(check.evidence, check.type, listing.agentName),
+    photoIndexes: check.photoIndexes
+      .map((index) => renumbered.get(index))
+      .filter((index): index is number => index !== undefined)
+      .sort((a, b) => a - b),
+  }));
+
+  const disclosure = checkDisclosure(listing);
+  return {
+    ...report,
+    listingUrl: listing.url,
+    disclosure,
+    photos,
+    crossChecks,
+    photosTotal: listing.photos.length,
+    status: deriveStatus(
+      photos.flatMap((photo) => photo.findings),
+      crossChecks,
+      disclosure,
+    ),
+  };
+}

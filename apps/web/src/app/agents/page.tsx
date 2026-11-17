@@ -47,8 +47,8 @@ export default function AgentsPage() {
         </li>
       </ol>
       <p>
-        A person reviews every dispute. While we look into it we can take the report down. If the
-        report is wrong we correct or remove it, and we aim to reply within five working days.
+        A person reviews every dispute. While we look into it we can take the report down, and if
+        the report is wrong we correct or remove it.
       </p>
 
       <h2>Avoiding the question</h2>
